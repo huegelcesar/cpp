@@ -1,0 +1,178 @@
+#ifndef __aspects_ah
+#define __aspects_ah
+
+#include <iostream>
+
+#include "config.h"
+
+//##############################################################################
+
+#if COUNTABLE
+
+aspect Countable {
+
+private:
+    pointcut components() = "Utility::Queue" || "Utility::Stack";
+    pointcut inc_methods() = "% Utility::Queue::enqueue(...)" || "% Utility::Stack::push(...)";
+    pointcut dec_methods() = "% Utility::Queue::dequeue(...)" || "% Utility::Stack::pop(...)";
+
+    advice components() : slice class {
+    private:
+        int _counter;
+
+    public:
+        int count() { return _counter; }
+    };
+    
+    advice construction( components() ) : before() {
+        tjp->target()->_counter = 0;
+    }
+
+    advice execution( inc_methods() ) : after() { 
+        tjp->target()->_counter++;
+    };
+
+    advice execution( dec_methods() ) : after() {
+        tjp->target()->_counter--;
+    };
+
+};
+
+#endif
+
+//##############################################################################
+
+#if LIMITED
+
+aspect Limited {
+
+private:
+    pointcut components() = "Utility::Queue"; // || another class
+    pointcut methods() = "% Utility::Queue::enqueue(...)";
+
+    advice components() : slice class Limited_Component {
+    private:
+        int _max_size;
+
+    public:
+        int max_size() { return _max_size; }
+
+        Limited_Component(int max_size) { _max_size = max_size; }
+    };
+
+    advice execution( methods() ) : order("Limited", "Countable");
+
+    advice construction( components() ) : before() {
+        tjp->target()->_max_size = 5;
+    }
+
+    advice execution( methods() ) : around() {
+        if ( tjp->target()->count() < tjp->target()->_max_size ) {
+            tjp->proceed();
+        }
+    };
+};
+
+#endif
+
+//##############################################################################
+
+#if NAVIGABLE
+
+aspect Navigable {
+
+private:
+    pointcut queue() = "Utility::Queue";
+    pointcut stack() = "Utility::Stack";
+    
+    pointcut components() = queue() || stack();
+
+    advice queue() : slice class {
+    private:
+        Element * _start() { return _head; }
+    };
+
+    advice stack() : slice class {
+    private:
+        Element * _start() { return _top; }
+    };
+
+    advice components() : slice class Iterable_Component {
+    public:        
+        Element operator[](unsigned int index) { 
+            Element * e = _start();//_head;
+            
+            for(int i = 0; e != NULL && i < index; i++ ){
+                e = e->next;
+            }
+
+            return *e;
+        }
+    };
+};
+
+#endif
+
+//##############################################################################
+
+#if LOGGING
+
+aspect Logging {
+
+private:
+    int i;
+
+    Logging() : i(0) {}
+
+    pointcut components() = "Utility::Queue"; // || another class
+
+    advice execution( components() ) : around() {
+        for(int a = 0; a < i; a++)
+            std::cerr << "      ";
+        std::cerr << "+  " << JoinPoint::signature () << std::endl ;
+
+        i++;
+        tjp->proceed();
+        i--;
+
+        for(int a = 0; a < i; a++)
+            std::cerr << "      ";
+        std::cerr << "-  " << JoinPoint::signature () << std::endl ;
+    };
+};
+
+#endif
+
+//##############################################################################
+
+#if SYNCHRONIZED
+
+#include <pthread.h>
+
+aspect Synchronized {
+
+private:
+    pointcut components() = "Utility::Queue"; // || another class
+    pointcut sync_methods() = "% Utility::Queue::enqueue(...)";
+
+    advice components() : slice struct {
+        pthread_mutex_t _mutex;
+    };
+
+    advice construction(components()) : before () {
+        pthread_mutex_t helper = PTHREAD_MUTEX_INITIALIZER;
+        tjp->that ()->_mutex = helper;
+    }
+
+    advice execution( sync_methods() ) : around() {
+        pthread_mutex_lock(&tjp->that()->_mutex);
+        tjp->proceed ();
+        pthread_mutex_unlock(&tjp->that()->_mutex);
+    };
+};
+
+#endif
+
+//##############################################################################
+
+#endif
